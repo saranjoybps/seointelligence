@@ -8,6 +8,8 @@ import CrawlProgress from '@/components/CrawlProgress'
 import ExportReport from '@/components/ExportReport'
 import OnPageSEO from '@/components/OnPageSEO'
 import ScoreDashboard from '@/components/ScoreDashboard'
+import type { ScoreSection } from '@/components/ScoreDashboard'
+import ScoreDetailModal from '@/components/ScoreDetailModal'
 import SemanticSEO from '@/components/SemanticSEO'
 import TechnicalSEO from '@/components/TechnicalSEO'
 import URLInput from '@/components/URLInput'
@@ -33,6 +35,7 @@ export default function AnalysisPage({ params }: { params: { id: string } }) {
   const [uxData, setUxData] = useState<any>(null)
   const [actionPlan, setActionPlan] = useState<Array<Record<string, any>>>([])
   const [scores, setScores] = useState({ technical: 0, onpage: 0, semantic: 0, ux: 0 })
+  const [detailsSection, setDetailsSection] = useState<ScoreSection | null>(null)
   const [aiStatusLabel, setAiStatusLabel] = useState('Waiting')
   const [aiStatusTone, setAiStatusTone] = useState<'ok' | 'info' | 'warn'>('info')
   const [toasts, setToasts] = useState<Array<{ id: string; text: string; tone: 'ok' | 'info' | 'warn' }>>([])
@@ -277,7 +280,15 @@ export default function AnalysisPage({ params }: { params: { id: string } }) {
             <p className='text-xs uppercase tracking-wide text-muted'>Live Analysis</p>
             <h1 className='text-xl font-semibold md:text-2xl'>{targetUrl || 'SEO Intelligence Dashboard'}</h1>
           </div>
-          <div className='rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm'>Overall Score: {overall}/100</div>
+          <div className='flex items-center gap-2'>
+            <button
+              onClick={() => router.push('/')}
+              className='rounded-md border border-white/15 px-3 py-2 text-sm text-muted transition hover:border-accent hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent/40'
+            >
+              Back to Home
+            </button>
+            <div className='rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm'>Overall Score: {overall}/100</div>
+          </div>
         </header>
 
         <URLInput initialValue={targetUrl} onSubmit={startNew} loading={loading} />
@@ -295,10 +306,10 @@ export default function AnalysisPage({ params }: { params: { id: string } }) {
 
           <div className='space-y-4'>
             <ScoreDashboard technical={scores.technical} onpage={scores.onpage} semantic={scores.semantic} ux={scores.ux} />
-            <TechnicalSEO data={technicalData} />
-            <OnPageSEO data={onpageData} />
-            <SemanticSEO data={semanticData} />
-            <UXSignals data={uxData} />
+            <TechnicalSEO data={technicalData} onOpenDetails={() => setDetailsSection('technical')} />
+            <OnPageSEO data={onpageData} onOpenDetails={() => setDetailsSection('onpage')} />
+            <SemanticSEO data={semanticData} onOpenDetails={() => setDetailsSection('semantic')} />
+            <UXSignals data={uxData} onOpenDetails={() => setDetailsSection('ux')} />
             <ActionPlan items={actionPlan} analysisId={analysis?.analysis_id || params.id} />
           </div>
 
@@ -323,6 +334,14 @@ export default function AnalysisPage({ params }: { params: { id: string } }) {
           </div>
         ))}
       </div>
+      <ScoreDetailModal
+        section={detailsSection}
+        onClose={() => setDetailsSection(null)}
+        technicalData={technicalData}
+        onpageData={onpageData}
+        semanticData={semanticData}
+        uxData={uxData}
+      />
     </main>
   )
 }

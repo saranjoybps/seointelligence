@@ -1,5 +1,7 @@
 'use client'
 
+export type ScoreSection = 'technical' | 'onpage' | 'semantic' | 'ux'
+
 interface Props {
   technical: number
   onpage: number
@@ -13,7 +15,13 @@ function gaugeColor(score: number) {
   return '#00ff88'
 }
 
-function Ring({ label, score }: { label: string; score: number }) {
+function Ring({
+  label,
+  score
+}: {
+  label: string
+  score: number
+}) {
   const radius = 42
   const circumference = 2 * Math.PI * radius
   const offset = circumference - (score / 100) * circumference

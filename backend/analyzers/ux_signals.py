@@ -46,6 +46,10 @@ async def analyze_ux(pages: list[dict[str, Any]]) -> dict[str, Any]:
             "pages_with_cta": 0.0,
             "navigation_score": 0,
             "content_structure_score": 0,
+            "low_readability_pages": [],
+            "no_cta_pages": [],
+            "no_navigation_pages": [],
+            "weak_structure_pages": [],
         }
 
     readability_scores = []
@@ -53,19 +57,29 @@ async def analyze_ux(pages: list[dict[str, Any]]) -> dict[str, Any]:
     cta_pages = 0
     nav_pages = 0
     structure_points = 0
+    low_readability_pages: list[str] = []
+    no_cta_pages: list[str] = []
+    no_navigation_pages: list[str] = []
+    weak_structure_pages: list[str] = []
 
     for p in pages:
         text = p.get("text_content", "")
         ease, grade = _flesch_kincaid(text)
         readability_scores.append(ease)
         grades.append(grade)
+        if ease < 50:
+            low_readability_pages.append(p.get("url", ""))
 
         content_lower = text.lower()
         if any(pattern in content_lower for pattern in CTA_PATTERNS):
             cta_pages += 1
+        else:
+            no_cta_pages.append(p.get("url", ""))
 
         if p.get("has_nav"):
             nav_pages += 1
+        else:
+            no_navigation_pages.append(p.get("url", ""))
 
         local_points = 0
         if p.get("has_list"):
@@ -78,6 +92,8 @@ async def analyze_ux(pages: list[dict[str, Any]]) -> dict[str, Any]:
         if any(pattern in first_200_words for pattern in CTA_PATTERNS):
             local_points += 1
         structure_points += local_points
+        if local_points <= 1:
+            weak_structure_pages.append(p.get("url", ""))
 
     total = len(pages)
     avg_readability = round(sum(readability_scores) / total, 2)
@@ -95,4 +111,8 @@ async def analyze_ux(pages: list[dict[str, Any]]) -> dict[str, Any]:
         "pages_with_cta": pages_with_cta,
         "navigation_score": navigation_score,
         "content_structure_score": content_structure_score,
+        "low_readability_pages": [u for u in low_readability_pages if u],
+        "no_cta_pages": [u for u in no_cta_pages if u],
+        "no_navigation_pages": [u for u in no_navigation_pages if u],
+        "weak_structure_pages": [u for u in weak_structure_pages if u],
     }

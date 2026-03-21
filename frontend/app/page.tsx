@@ -35,7 +35,7 @@ export default function HomePage() {
             AI-Powered SEO Intelligence
           </p>
           <h1 className='mb-4 text-3xl font-bold md:text-6xl' style={{ fontFamily: 'var(--font-syne)' }}>
-            Full-Stack Digital Marketing Analysis Platform
+            AI-Powered SEO Intelligence Platform
           </h1>
           <p className='mx-auto max-w-3xl text-muted'>
             Crawl websites, score technical and on-page SEO, discover semantic content gaps, and stream AI recommendations in real time.

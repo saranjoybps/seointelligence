@@ -85,6 +85,24 @@ async def analyze_onpage(pages: list[dict[str, Any]]) -> dict[str, Any]:
         if len(path) > 80 or re.search(r"[^a-zA-Z0-9/_\-]", path):
             url_readability_issues.append(p["url"])
 
+    page_tag_audit = []
+    for p in pages:
+        page_tag_audit.append(
+            {
+                "url": p.get("url", ""),
+                "title": p.get("title", ""),
+                "meta_description": p.get("meta_description", ""),
+                "word_count": p.get("word_count", 0),
+                "h1": p.get("h1", []),
+                "h2": p.get("h2", []),
+                "h3": p.get("h3", []),
+                "h4_h6": p.get("h4_h6", []),
+                "missing_title": not bool(p.get("title")),
+                "missing_meta": not bool(p.get("meta_description")),
+                "thin_content": p.get("word_count", 0) < 300,
+            }
+        )
+
     score = 100
     score -= min(len(missing_titles) * 2, 20)
     score -= min(len(missing_metas) * 2, 20)
@@ -112,4 +130,5 @@ async def analyze_onpage(pages: list[dict[str, Any]]) -> dict[str, Any]:
         "internal_linking_issues": internal_linking_issues,
         "keyword_stuffing_flag": avg_keyword_density > 3.0,
         "url_readability_issues": url_readability_issues,
+        "page_tag_audit": page_tag_audit,
     }

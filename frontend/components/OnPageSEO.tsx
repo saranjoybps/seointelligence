@@ -1,13 +1,45 @@
 interface Props {
   data: any
+  onOpenDetails?: () => void
 }
 
-export default function OnPageSEO({ data }: Props) {
-  if (!data) return <div className='panel p-4 text-sm text-muted'>On-page analysis pending...</div>
+export default function OnPageSEO({ data, onOpenDetails }: Props) {
+  if (!data) {
+    return (
+      <div className='panel p-4'>
+        <div className='mb-2 flex items-center justify-between'>
+          <h3 className='text-lg font-semibold'>On-Page SEO</h3>
+          {onOpenDetails && (
+            <button
+              onClick={onOpenDetails}
+              className='rounded-md border border-accent/60 bg-accent/10 px-3 py-1 text-xs font-medium text-accent transition hover:border-accent hover:bg-accent/20 hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent/40'
+              title='View more On-Page SEO details'
+              aria-label='View more On-Page SEO details'
+            >
+              View More
+            </button>
+          )}
+        </div>
+        <p className='text-sm text-muted'>On-page analysis pending...</p>
+      </div>
+    )
+  }
 
   return (
     <div className='panel p-4'>
-      <h3 className='mb-3 text-lg font-semibold'>On-Page SEO</h3>
+      <div className='mb-3 flex items-center justify-between'>
+        <h3 className='text-lg font-semibold'>On-Page SEO</h3>
+        {onOpenDetails && (
+          <button
+            onClick={onOpenDetails}
+            className='rounded-md border border-accent/60 bg-accent/10 px-3 py-1 text-xs font-medium text-accent transition hover:border-accent hover:bg-accent/20 hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent/40'
+            title='View more On-Page SEO details'
+            aria-label='View more On-Page SEO details'
+          >
+            View More
+          </button>
+        )}
+      </div>
       <div className='grid gap-2 text-sm md:grid-cols-2'>
         <p>Score: <span className='font-semibold text-accent'>{data.score}</span></p>
         <p>Missing titles: {data.missing_titles}</p>
