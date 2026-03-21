@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0a0f;
+  --panel: #10111a;
+  --accent: #00ff88;
+  --indigo: #6366f1;
+  --text: #e7e7ee;
+  --muted: #9ca3af;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: radial-gradient(circle at 15% 20%, rgba(99, 102, 241, 0.16), transparent 35%),
+    radial-gradient(circle at 80% 10%, rgba(0, 255, 136, 0.1), transparent 30%),
+    var(--bg);
+  color: var(--text);
+}
+
+body {
+  background-size: auto, auto, cover;
+}
+
+.panel {
+  @apply rounded-2xl border border-white/10 bg-panel backdrop-blur-lg;
+  background-color: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.grid-bg {
+  background-image: theme('backgroundImage.grid');
+  background-size: 28px 28px;
+}
