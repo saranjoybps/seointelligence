@@ -9,3 +9,8 @@ node_modules/
 
 # Runtime data
 backend/data/
+
+# Environment files
+.env
+.env.*
+backend/.env

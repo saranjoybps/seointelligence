@@ -11,6 +11,11 @@ class AnalysisRequest(BaseModel):
     include_subdomains: bool = False
 
 
+class TechnicalInsightRequest(BaseModel):
+    url: str
+    technical: dict[str, Any] = Field(default_factory=dict)
+
+
 class SEOIssue(BaseModel):
     severity: str  # critical | warning | info
     category: str

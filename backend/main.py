@@ -17,7 +17,7 @@ from analyzers.semantic_seo import analyze_semantic
 from analyzers.technical_seo import analyze_technical
 from analyzers.ux_signals import analyze_ux
 from crawler.deep_crawler import DeepCrawler
-from models.schemas import AnalysisRequest
+from models.schemas import AnalysisRequest, TechnicalInsightRequest
 from storage.json_store import JsonStore
 
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +51,44 @@ async def get_analysis(analysis_id: str) -> dict[str, Any]:
     if not result:
         raise HTTPException(status_code=404, detail="Analysis not found")
     return result
+
+
+@app.post("/api/ai/url-insight")
+async def ai_url_insight(request: AnalysisRequest) -> dict[str, Any]:
+    normalized_url = store.normalize_url(request.url)
+    ollama = OllamaClient()
+    health = await ollama.health()
+    if not health.get("ok"):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Ollama endpoint unavailable. "
+                f"Expected {os.getenv('OLLAMA_URL', 'http://localhost:11434')}/api/generate"
+            ),
+        )
+    try:
+        return await ollama.generate_url_only_insight(normalized_url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"URL insight generation failed: {exc}") from exc
+
+
+@app.post("/api/ai/technical-insight")
+async def ai_technical_insight(request: TechnicalInsightRequest) -> dict[str, Any]:
+    normalized_url = store.normalize_url(request.url)
+    ollama = OllamaClient()
+    health = await ollama.health()
+    if not health.get("ok"):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Ollama endpoint unavailable. "
+                f"Expected {os.getenv('OLLAMA_URL', 'http://localhost:11434')}/api/generate"
+            ),
+        )
+    try:
+        return await ollama.generate_technical_only_insight(normalized_url, request.technical or {})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Technical insight generation failed: {exc}") from exc
 
 
 @app.post("/api/analyze/stream")
@@ -164,6 +202,7 @@ async def analyze_stream(request: AnalysisRequest) -> StreamingResponse:
                 ]
 
                 for idx, (section_key, section_payload, section_label) in enumerate(ai_sections, start=1):
+                    section_chunks: list[str] = []
                     try:
                         ai_input_payload = build_ai_input_payload(normalized_url, section_payload, section_name=section_key)
                         ai_debug_payload = {k: v for k, v in ai_input_payload.items() if k != "prompt"}
@@ -183,7 +222,6 @@ async def analyze_stream(request: AnalysisRequest) -> StreamingResponse:
                             }
                         )
 
-                        section_chunks: list[str] = []
                         heading = f"\n\n## {section_label} Insights\n"
                         ai_chunks.append(heading)
                         yield _sse({"phase": "ai_stream", "chunk": heading, "analysis_id": analysis_id, "data": {"section": section_key}})
@@ -209,7 +247,6 @@ async def analyze_stream(request: AnalysisRequest) -> StreamingResponse:
                                 "data": {"section": section_key},
                             }
                         )
-                        continue
 
                     if not section_chunks:
                         try:

@@ -11,19 +11,24 @@ import httpx
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MODEL = os.getenv("OLLAMA_MODEL", "llama3:latest")
 NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "1800"))
+RECOMMENDATION_NUM_PREDICT = int(os.getenv("OLLAMA_RECOMMENDATION_NUM_PREDICT", "600"))
+TECHNICAL_ONLY_NUM_PREDICT = int(os.getenv("OLLAMA_TECHNICAL_NUM_PREDICT", "500"))
 NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 PROMPT_SAFETY_MARGIN = int(os.getenv("OLLAMA_PROMPT_SAFETY_MARGIN", "600"))
+URL_INSIGHT_NUM_PREDICT = int(os.getenv("OLLAMA_URL_INSIGHT_NUM_PREDICT", "220"))
+OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "300"))
+OLLAMA_STREAM_CONNECT_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_STREAM_CONNECT_TIMEOUT_SECONDS", "30"))
 
-SYSTEM_PROMPT = """You are an elite SEO strategist and digital marketing expert with 15+ years of experience.
-You analyze websites with surgical precision and provide actionable, data-driven recommendations.
-You think like a growth hacker, SEO engineer, and content strategist combined.
-Always be specific, cite the data provided, and prioritize recommendations by ROI impact."""
+SYSTEM_PROMPT = """You are a senior SEO operator.
+Return concise, execution-first recommendations only.
+No long paragraphs, no fluff, no generic advice.
+Every recommendation must reference a metric from input and include a concrete target."""
 
 logger = logging.getLogger("seo-intelligence.ai")
 
 
 class OllamaClient:
-    def __init__(self, timeout: int = 120):
+    def __init__(self, timeout: int = OLLAMA_TIMEOUT_SECONDS):
         self.timeout = timeout
 
     async def health(self) -> dict[str, Any]:
@@ -39,7 +44,14 @@ class OllamaClient:
         prompt = request_payload["prompt"]
         got_tokens = False
         chunk_count = 0
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        # For streaming, disable read timeout so slow first-token/model-load does not abort the request.
+        stream_timeout = httpx.Timeout(
+            connect=OLLAMA_STREAM_CONNECT_TIMEOUT_SECONDS,
+            read=None,
+            write=self.timeout,
+            pool=self.timeout,
+        )
+        async with httpx.AsyncClient(timeout=stream_timeout) as client:
             async with client.stream(
                 "POST",
                 f"{OLLAMA_URL}/api/generate",
@@ -48,7 +60,7 @@ class OllamaClient:
                     "prompt": prompt,
                     "system": SYSTEM_PROMPT,
                     "stream": True,
-                    "options": {"temperature": 0.3, "top_p": 0.9, "num_predict": NUM_PREDICT, "num_ctx": NUM_CTX},
+                    "options": {"temperature": 0.2, "top_p": 0.9, "num_predict": RECOMMENDATION_NUM_PREDICT, "num_ctx": NUM_CTX},
                 },
             ) as response:
                 if response.status_code >= 400:
@@ -91,7 +103,8 @@ class OllamaClient:
     async def generate_analysis_text(self, url: str, data: dict[str, Any], section_name: str | None = None) -> str:
         request_payload = build_ai_input_payload(url, data, section_name=section_name)
         prompt = request_payload["prompt"]
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        text_timeout = httpx.Timeout(connect=OLLAMA_STREAM_CONNECT_TIMEOUT_SECONDS, read=self.timeout, write=self.timeout, pool=self.timeout)
+        async with httpx.AsyncClient(timeout=text_timeout) as client:
             response = await client.post(
                 f"{OLLAMA_URL}/api/generate",
                 json={
@@ -99,7 +112,7 @@ class OllamaClient:
                     "prompt": prompt,
                     "system": SYSTEM_PROMPT,
                     "stream": False,
-                    "options": {"temperature": 0.3, "top_p": 0.9, "num_predict": NUM_PREDICT, "num_ctx": NUM_CTX},
+                    "options": {"temperature": 0.2, "top_p": 0.9, "num_predict": RECOMMENDATION_NUM_PREDICT, "num_ctx": NUM_CTX},
                 },
             )
             if response.status_code >= 400:
@@ -122,7 +135,8 @@ class OllamaClient:
 
     async def generate_action_plan(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         prompt = build_action_plan_prompt(data)
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        text_timeout = httpx.Timeout(connect=OLLAMA_STREAM_CONNECT_TIMEOUT_SECONDS, read=self.timeout, write=self.timeout, pool=self.timeout)
+        async with httpx.AsyncClient(timeout=text_timeout) as client:
             response = await client.post(
                 f"{OLLAMA_URL}/api/generate",
                 json={
@@ -148,6 +162,75 @@ class OllamaClient:
             if parsed:
                 return [self._normalize_action(item) for item in parsed]
             return []
+
+    async def generate_url_only_insight(self, url: str) -> dict[str, Any]:
+        prompt = build_url_only_prompt(url)
+        prompt_tokens = estimate_tokens(prompt)
+        max_input_tokens = max(200, NUM_CTX - URL_INSIGHT_NUM_PREDICT - PROMPT_SAFETY_MARGIN)
+        text_timeout = httpx.Timeout(connect=OLLAMA_STREAM_CONNECT_TIMEOUT_SECONDS, read=self.timeout, write=self.timeout, pool=self.timeout)
+        async with httpx.AsyncClient(timeout=text_timeout) as client:
+            response = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": MODEL,
+                    "prompt": prompt,
+                    "system": "Return concise plain text. No markdown tables.",
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.2,
+                        "top_p": 0.9,
+                        "num_predict": URL_INSIGHT_NUM_PREDICT,
+                        "num_ctx": NUM_CTX,
+                    },
+                },
+            )
+            if response.status_code >= 400:
+                body = response.text[:400]
+                raise RuntimeError(
+                    f"Ollama url-only HTTP {response.status_code} on /api/generate. "
+                    f"OLLAMA_URL={OLLAMA_URL}. Body sample: {body}"
+                )
+            payload = response.json()
+            if payload.get("error"):
+                raise RuntimeError(str(payload["error"]))
+            return {
+                "url": url,
+                "model": MODEL,
+                "response": str(payload.get("response", "")).strip(),
+                "prompt_characters": len(prompt),
+                "input_token_estimate": prompt_tokens,
+                "max_input_tokens_target": max_input_tokens,
+                "num_predict": URL_INSIGHT_NUM_PREDICT,
+                "num_ctx": NUM_CTX,
+            }
+
+    async def generate_technical_only_insight(self, url: str, technical_data: dict[str, Any]) -> dict[str, Any]:
+        request_payload = build_technical_input_payload(url, technical_data)
+        prompt = request_payload["prompt"]
+        text_timeout = httpx.Timeout(connect=OLLAMA_STREAM_CONNECT_TIMEOUT_SECONDS, read=self.timeout, write=self.timeout, pool=self.timeout)
+        async with httpx.AsyncClient(timeout=text_timeout) as client:
+            response = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": MODEL,
+                    "prompt": prompt,
+                    "system": "Return concise plain text technical recommendations.",
+                    "stream": False,
+                    "options": {"temperature": 0.2, "top_p": 0.9, "num_predict": TECHNICAL_ONLY_NUM_PREDICT, "num_ctx": NUM_CTX},
+                },
+            )
+            if response.status_code >= 400:
+                body = response.text[:400]
+                raise RuntimeError(
+                    f"Ollama technical-only HTTP {response.status_code} on /api/generate. "
+                    f"OLLAMA_URL={OLLAMA_URL}. Body sample: {body}"
+                )
+            payload = response.json()
+            if payload.get("error"):
+                raise RuntimeError(str(payload["error"]))
+            result = {k: v for k, v in request_payload.items() if k != "prompt"}
+            result["response"] = str(payload.get("response", "")).strip()
+            return result
 
     @staticmethod
     def _safe_json_list(raw: str) -> list[dict[str, Any]]:
@@ -284,6 +367,33 @@ def _prune_for_llm(data: dict[str, Any], tight: bool = False) -> dict[str, Any]:
     }
 
 
+def _prune_technical_for_llm(technical: dict[str, Any], tight: bool = False) -> dict[str, Any]:
+    max_url_samples = 4 if not tight else 2
+    pruned_issues = [_issue_preview(i, max_url_samples) for i in _limit(technical.get("issues", []), 6 if not tight else 4)]
+    pruned_critical = [_issue_preview(i, max_url_samples) for i in _limit(technical.get("critical_issues", []), 4 if not tight else 3)]
+    return {
+        "score": technical.get("score", 0),
+        "https_status": technical.get("https_status", {}),
+        "page_speed": {
+            "fast": technical.get("page_speed", {}).get("fast", 0),
+            "ok": technical.get("page_speed", {}).get("ok", 0),
+            "slow": technical.get("page_speed", {}).get("slow", 0),
+            "avg_response_ms": technical.get("page_speed", {}).get("avg_response_ms", 0),
+            "slow_url_samples": _limit(technical.get("page_speed", {}).get("slow_urls", []), max_url_samples),
+        },
+        "broken_links_count": len(technical.get("broken_links", [])),
+        "broken_link_samples": _limit(technical.get("broken_links", []), max_url_samples),
+        "redirect_chains_count": len(technical.get("redirect_chains", [])),
+        "canonical_issue_count": len(technical.get("canonical_issues", [])),
+        "robots_txt": technical.get("robots_txt", {}),
+        "sitemap": technical.get("sitemap", {}),
+        "mobile_ready": technical.get("mobile_ready", False),
+        "critical_issues": pruned_critical,
+        "issues": pruned_issues,
+        "h1_summary": technical.get("h1_summary", {}),
+    }
+
+
 def build_analysis_prompt(url: str, data: dict[str, Any], section_name: str | None = None) -> str:
     technical = data.get("technical", {})
     onpage = data.get("onpage", {})
@@ -310,7 +420,8 @@ def build_analysis_prompt(url: str, data: dict[str, Any], section_name: str | No
         section_header = f"{section_name.upper()} SEO REVIEW"
 
     return f"""
-Perform a comprehensive SEO & digital marketing analysis for: {url}
+Analyze this website section and return only compact, metric-based recommendations.
+Website: {url}
 Focus area: {section_header}
 
 ## NUMERICAL DATA SNAPSHOT
@@ -334,12 +445,14 @@ Focus area: {section_header}
 ## RAW FINDINGS JSON
 {json.dumps(data, separators=(",", ":"), ensure_ascii=True)}
 
-Provide:
-1) Executive summary (3 sentences)
-2) Top 3 critical fixes with clear ROI rationale
-3) Concrete actions tied only to this focus area
-4) 30-day quick wins
-5) KPI metrics to track
+Return exactly 5 items, each on a new line, no extra text.
+Format for each line:
+[P1|P2|P3] Metric=<metric_name:value>; Problem=<7 words max>; Action=<12 words max>; Target=<specific number>; ETA=<days>
+
+Rules:
+- Use only metrics present in input.
+- Use imperative actions only.
+- No introductions, no conclusions, no markdown headings.
 """
 
 
@@ -366,13 +479,91 @@ Return 8-15 actions sorted by business impact.
 """
 
 
+def build_url_only_prompt(url: str) -> str:
+    return f"""
+You are evaluating only from the URL string. Do not claim that you crawled the site.
+
+Website URL: {url}
+
+Return a short "quick insight" with:
+1) probable niche/business type
+2) one likely SEO strength
+3) three likely SEO risks to verify
+4) five immediate checks to run next
+
+Keep it under 140 words.
+"""
+
+
+def build_technical_recommendation_prompt(url: str, technical_data: dict[str, Any]) -> str:
+    return f"""
+You are an SEO technical auditor.
+
+Website: {url}
+
+Technical SEO metrics data:
+{json.dumps(technical_data, separators=(",", ":"), ensure_ascii=True)}
+
+Task:
+- Focus only on technical SEO.
+- Return exactly 6 lines, no extra text.
+- Format per line:
+  [P1|P2|P3] Metric=<metric_name:value>; Fix=<12 words max>; Target=<specific number>; ETA=<days>
+- No paragraph output, no headings.
+"""
+
+
+def build_technical_input_payload(url: str, technical_data: dict[str, Any]) -> dict[str, Any]:
+    max_input_tokens = max(500, NUM_CTX - TECHNICAL_ONLY_NUM_PREDICT - PROMPT_SAFETY_MARGIN)
+    pruned = _prune_technical_for_llm(technical_data, tight=False)
+    prompt = build_technical_recommendation_prompt(url, pruned)
+    input_tokens = estimate_tokens(prompt)
+    trim_level = "normal"
+
+    if input_tokens > max_input_tokens:
+        pruned = _prune_technical_for_llm(technical_data, tight=True)
+        prompt = build_technical_recommendation_prompt(url, pruned)
+        input_tokens = estimate_tokens(prompt)
+        trim_level = "tight"
+
+    if input_tokens > max_input_tokens:
+        pruned = {
+            "score": technical_data.get("score", 0),
+            "page_speed": {
+                "avg_response_ms": technical_data.get("page_speed", {}).get("avg_response_ms", 0),
+                "slow": technical_data.get("page_speed", {}).get("slow", 0),
+            },
+            "broken_links_count": len(technical_data.get("broken_links", [])),
+            "redirect_chains_count": len(technical_data.get("redirect_chains", [])),
+            "canonical_issue_count": len(technical_data.get("canonical_issues", [])),
+            "critical_issues": _limit(technical_data.get("critical_issues", []), 2),
+        }
+        prompt = build_technical_recommendation_prompt(url, pruned)
+        input_tokens = estimate_tokens(prompt)
+        trim_level = "minimal"
+
+    return {
+        "model": MODEL,
+        "url": url,
+        "structured_data": pruned,
+        "prompt": prompt,
+        "prompt_characters": len(prompt),
+        "input_token_estimate": input_tokens,
+        "max_input_tokens_target": max_input_tokens,
+        "num_predict": TECHNICAL_ONLY_NUM_PREDICT,
+        "num_ctx": NUM_CTX,
+        "trim_level": trim_level,
+        "section_name": "technical",
+    }
+
+
 def estimate_tokens(text: str) -> int:
     # Rough approximation used for observability; exact tokenization is model-specific.
     return max(1, int(round(len(text) / 4)))
 
 
 def build_ai_input_payload(url: str, data: dict[str, Any], section_name: str | None = None) -> dict[str, Any]:
-    max_input_tokens = max(500, NUM_CTX - NUM_PREDICT - PROMPT_SAFETY_MARGIN)
+    max_input_tokens = max(500, NUM_CTX - RECOMMENDATION_NUM_PREDICT - PROMPT_SAFETY_MARGIN)
 
     pruned = _prune_for_llm(data, tight=False)
     prompt = build_analysis_prompt(url, pruned, section_name=section_name)
@@ -405,7 +596,7 @@ def build_ai_input_payload(url: str, data: dict[str, Any], section_name: str | N
         "prompt_characters": len(prompt),
         "input_token_estimate": input_tokens,
         "max_input_tokens_target": max_input_tokens,
-        "num_predict": NUM_PREDICT,
+        "num_predict": RECOMMENDATION_NUM_PREDICT,
         "num_ctx": NUM_CTX,
         "trim_level": trim_level,
         "section_name": section_name or "full",
